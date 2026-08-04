@@ -33,4 +33,4 @@ include(cmake/packagex.cmake)
 
 # 测试
 enable_testing()
-add_subdirectory(test)
+add_subdirectory(tutorial)

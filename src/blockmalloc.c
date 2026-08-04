@@ -212,7 +212,7 @@ int64_t blocks_alloc(blocks_meta_t *meta, void *block_start)
         uint64_t free_id = meta->free_next_id;
         int64_t b_offset = block_offset(meta, free_id);
         block64_t free_block = getblock_t(meta, (uint8_t *)block_start + b_offset);
-        meta->free_next_id = free_block.next_free_id;
+        meta->free_next_id = free_block.has_next_free ? (int64_t)free_block.next_free_id : -1;
         meta->used_blocks++;
         setblock_t(meta, (uint8_t *)block_start + b_offset, 1, -1);
 
