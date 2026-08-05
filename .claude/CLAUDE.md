@@ -73,3 +73,14 @@ int64_t blockid_bydataoffset(const blocks_meta_t *meta, uint64_t data_offset);
 ```
 
 注意：meta 区和 block 区地址独立——调用者自行管理两块内存。`blocks_meta_t` 本身也在 meta 区开头，`block_start` 是 block 区的起始指针（通常为调用者分配的字节数组）。
+
+## 验收测试
+
+`python3 tutorial/test.py` 是权威验收手段，任何改动后必须跑通：
+
+```bash
+python3 tutorial/test.py --repeat 10   # 改动后验收：每 case 重复 10 轮
+python3 tutorial/test.py               # 快速验证
+```
+
+CTest（`cd build && ctest`）仅作快速冒烟，不含耗时统计和重复压力测试，不可替代 `test.py`。

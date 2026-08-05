@@ -10,7 +10,6 @@ include(GNUInstallDirs)
 # 共享库
 add_library(blockmalloc SHARED
     src/blockmalloc.c
-    src/spinlock.c
 )
 
 set_target_properties(blockmalloc PROPERTIES
