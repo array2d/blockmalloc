@@ -1,3 +1,4 @@
+#pragma once
 /*
 blockmalloc: 固定大小内存块分配器（block pool）。C11，无外部依赖。
 
