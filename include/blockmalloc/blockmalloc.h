@@ -44,9 +44,14 @@ int     blocks_init(blocks_meta_t *meta, uint64_t total_size, uint64_t block_siz
 int64_t blocks_alloc(blocks_meta_t *meta, void *block_start);
 void    blocks_free(blocks_meta_t *meta, void *block_start, uint64_t block_id);
 
-// 辅助偏移计算
-int64_t block_offset(const blocks_meta_t *meta, uint64_t block_id);
-int64_t blockdata_offset(const blocks_meta_t *meta, uint64_t block_id);
+// 辅助偏移计算（实现 TU 内联；无外部消费者，不导出符号）
+#ifdef BLOCKMALLOC_IMPLEMENTATION
+#define BLOCKS_INLINE static inline
+#else
+#define BLOCKS_INLINE
+#endif
+BLOCKS_INLINE int64_t block_offset(const blocks_meta_t *meta, uint64_t block_id);
+BLOCKS_INLINE int64_t blockdata_offset(const blocks_meta_t *meta, uint64_t block_id);
 int64_t blockid_byblockoffset(const blocks_meta_t *meta, uint64_t block_offset);
 int64_t blockid_bydataoffset(const blocks_meta_t *meta, uint64_t data_offset);
 
@@ -265,12 +270,12 @@ int blocks_init(blocks_meta_t *meta, const uint64_t total_size, const uint64_t b
     return 0;
 }
 
-int64_t block_offset(const blocks_meta_t *meta, const uint64_t block_id)
+BLOCKS_INLINE int64_t block_offset(const blocks_meta_t *meta, const uint64_t block_id)
 {
     int64_t offset = block_id * BLOCK_SIZE(meta);
     return offset;
 }
-int64_t blockdata_offset(const blocks_meta_t *meta, const uint64_t block_id)
+BLOCKS_INLINE int64_t blockdata_offset(const blocks_meta_t *meta, const uint64_t block_id)
 {
     int64_t offset = block_offset(meta, block_id);
     return offset + meta->sizeof_block_head;
