@@ -1,56 +1,45 @@
+/* Multi-threaded concurrent alloc/free within a single process. */
 #include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include "blockmalloc/blockmalloc.h"
+#include "common.h"
 
 #define NUM_THREADS 8
 #define BLOCKS_PER_THREAD 500
+#define ROUNDS 20
 #define POOL_SIZE (1024 * 1024 * 4)
-#define BLOCK_SIZE 64
+#define DATA_SIZE 64
 
 static blocks_meta_t meta;
 static uint8_t *pool;
+static uint32_t *owners;
 
-void* thread_func(void *arg) {
-    int64_t *ids = malloc(BLOCKS_PER_THREAD * sizeof(int64_t));
-
-    for (int i = 0; i < BLOCKS_PER_THREAD; i++) {
-        ids[i] = blocks_alloc(&meta, pool);
-        if (ids[i] < 0) {
-            printf("[ERROR] alloc failed at i=%d\n", i);
-            free(ids);
-            return (void*)1;
-        }
-    }
-    for (int i = 0; i < BLOCKS_PER_THREAD; i++) {
-        blocks_free(&meta, pool, ids[i]);
-    }
-    free(ids);
-    return NULL;
+static void *thread_func(void *arg)
+{
+    uint32_t tag = (uint32_t)(uintptr_t)arg;
+    return stress_worker(&meta, pool, owners, tag, BLOCKS_PER_THREAD, ROUNDS) ? (void *)1 : NULL;
 }
 
-int main() {
-    pool = malloc(POOL_SIZE);
-    memset(pool, 0, POOL_SIZE);
-    blocks_init(&meta, POOL_SIZE, BLOCK_SIZE);
+int main(void)
+{
+    pool = calloc(1, POOL_SIZE);
+    CHECK(pool != NULL && blocks_init(&meta, POOL_SIZE, DATA_SIZE) == 0);
+    owners = calloc(pool_capacity(&meta), sizeof *owners);
+    CHECK(owners != NULL);
 
     pthread_t threads[NUM_THREADS];
+    for (uintptr_t i = 0; i < NUM_THREADS; i++)
+        CHECK(pthread_create(&threads[i], NULL, thread_func, (void *)(i + 1)) == 0);
     int errors = 0;
-
-    for (int i = 0; i < NUM_THREADS; i++) {
-        pthread_create(&threads[i], NULL, thread_func, NULL);
-    }
     for (int i = 0; i < NUM_THREADS; i++) {
         void *ret;
         pthread_join(threads[i], &ret);
-        if (ret != NULL) errors++;
+        if (ret != NULL)
+            errors++;
     }
-
-    printf("multithread: used=%zu malloc=%zu errors=%d\n",
-           (size_t)meta.used_blocks, (size_t)meta.malloc_blocks, errors);
-
-    int ok = (meta.used_blocks == 0 && errors == 0);
+    printf("multithread: used=%llu malloc=%llu errors=%d\n",
+           (unsigned long long)meta.used_blocks, (unsigned long long)blocks_malloc_count(&meta), errors);
+    CHECK(errors == 0 && meta.used_blocks == 0);
+    CHECK(blocks_malloc_count(&meta) <= (uint64_t)NUM_THREADS * BLOCKS_PER_THREAD);
+    free(owners);
     free(pool);
-    return ok ? 0 : 1;
+    return 0;
 }

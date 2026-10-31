@@ -1,66 +1,49 @@
+/* Multi-process concurrent alloc/free over MAP_SHARED anonymous memory. */
 #define _GNU_SOURCE
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/wait.h>
 #include <sys/mman.h>
-#include "blockmalloc/blockmalloc.h"
+#include <sys/wait.h>
+#include <unistd.h>
+#include "common.h"
 
 #define NUM_PROCESSES 4
 #define BLOCKS_PER_PROCESS 500
+#define ROUNDS 20
 #define POOL_SIZE (1024 * 1024 * 4)
-#define BLOCK_SIZE 64
+#define DATA_SIZE 64
 
-int main() {
-    blocks_meta_t *meta = mmap(NULL, sizeof(blocks_meta_t),
-        PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-    uint8_t *pool = mmap(NULL, POOL_SIZE,
-        PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+static void *shared(size_t n)
+{
+    void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    return p == MAP_FAILED ? NULL : p;
+}
 
-    if (meta == MAP_FAILED || pool == MAP_FAILED) {
-        perror("mmap");
-        return 1;
-    }
-    memset(pool, 0, POOL_SIZE);
-    blocks_init(meta, POOL_SIZE, BLOCK_SIZE);
+int main(void)
+{
+    blocks_meta_t *meta = shared(sizeof *meta);
+    uint8_t *pool = shared(POOL_SIZE);
+    CHECK(meta != NULL && pool != NULL && blocks_init(meta, POOL_SIZE, DATA_SIZE) == 0);
+    size_t owners_size = pool_capacity(meta) * sizeof(uint32_t);
+    uint32_t *owners = shared(owners_size);
+    CHECK(owners != NULL);
 
     for (int p = 0; p < NUM_PROCESSES; p++) {
         pid_t pid = fork();
-        if (pid == 0) {
-            int64_t *ids = malloc(BLOCKS_PER_PROCESS * sizeof(int64_t));
-
-            for (int i = 0; i < BLOCKS_PER_PROCESS; i++) {
-                ids[i] = blocks_alloc(meta, pool);
-                if (ids[i] < 0) {
-                    printf("[ERROR] process %d alloc failed at i=%d\n", getpid(), i);
-                    free(ids);
-                    _exit(1);
-                }
-            }
-            for (int i = 0; i < BLOCKS_PER_PROCESS; i++) {
-                blocks_free(meta, pool, ids[i]);
-            }
-            free(ids);
-            _exit(0);
-        } else if (pid < 0) {
-            perror("fork");
-            return 1;
-        }
+        CHECK(pid >= 0);
+        if (pid == 0)
+            _exit(stress_worker(meta, pool, owners, (uint32_t)p + 1, BLOCKS_PER_PROCESS, ROUNDS));
     }
-
     int ok = 1;
     for (int i = 0; i < NUM_PROCESSES; i++) {
         int status;
-        wait(&status);
-        if (WEXITSTATUS(status) != 0) ok = 0;
+        if (wait(&status) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+            ok = 0;  // fail on signal termination as well
     }
-
-    printf("multiprocess: used=%zu malloc=%zu\n",
-           (size_t)meta->used_blocks, (size_t)meta->malloc_blocks);
-
-    ok = ok && (meta->used_blocks == 0);
-    munmap(meta, sizeof(blocks_meta_t));
+    printf("multiprocess: used=%llu malloc=%llu\n",
+           (unsigned long long)meta->used_blocks, (unsigned long long)blocks_malloc_count(meta));
+    CHECK(ok && meta->used_blocks == 0);
+    CHECK(blocks_malloc_count(meta) <= (uint64_t)NUM_PROCESSES * BLOCKS_PER_PROCESS);
+    munmap(owners, owners_size);
     munmap(pool, POOL_SIZE);
-    return ok ? 0 : 1;
+    munmap(meta, sizeof *meta);
+    return 0;
 }
